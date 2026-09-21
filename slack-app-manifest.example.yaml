@@ -1,0 +1,36 @@
+# Replace YOUR_HOST with your public HTTPS hostname before importing into Slack.
+display_information:
+  name: HubSpot
+  description: Sync Slack threads to HubSpot tickets
+  background_color: "#FF4800"
+features:
+  bot_user:
+    display_name: HubSpot
+    always_online: false
+oauth_config:
+  pkce_enabled: false
+  scopes:
+    bot:
+    - app_mentions:read
+    - chat:write
+    - channels:history
+    - groups:history
+    - groups:read
+    - reactions:write
+    - users:read
+    - files:read
+settings:
+  event_subscriptions:
+    request_url: https://YOUR_HOST/slack/events
+    bot_events:
+    - app_mention
+    - message.channels
+    - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  # The service reads a static bot token; it does not implement OAuth refresh.
+  token_rotation_enabled: false
+  app_level_token_rotation_enabled: false
+  is_mcp_enabled: false

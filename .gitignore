@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.tmp/
+bin/
+coverage.out
+config.yaml
+data/
+*.db
+*.db-shm
+*.db-wal
+secrets/

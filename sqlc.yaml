@@ -1,0 +1,18 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    gen:
+      go:
+        out: "internal/store/postgres/sqlc"
+        package: "sqlc"
+        sql_package: "database/sql"
+    queries: "internal/store/postgres/queries.sql"
+    schema: "internal/store/postgres/schema.sql"
+  - engine: "sqlite"
+    gen:
+      go:
+        out: "internal/store/sqlite/sqlc"
+        package: "sqlc"
+        sql_package: "database/sql"
+    queries: "internal/store/sqlite/queries.sql"
+    schema: "internal/store/sqlite/schema.sql"

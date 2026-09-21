@@ -1,0 +1,249 @@
+openapi: 3.0.3
+info:
+  title: Slack HubSpot bridge
+  version: 1.0.0
+paths:
+  /livez:
+    get:
+      operationId: live
+      responses:
+        '200':
+          description: Process is alive
+  /metrics:
+    get:
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus metrics; the exporter negotiates the exposition format using Accept.
+          content:
+            application/openmetrics-text:
+              schema:
+                type: string
+            application/vnd.google.protobuf:
+              schema:
+                format: binary
+                type: string
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Metrics collection failed
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Metrics storage unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+  /readyz:
+    get:
+      operationId: ready
+      responses:
+        '200':
+          description: Selected storage and schema are ready
+        '503':
+          description: Not ready or shutting down
+  /hubspot/events:
+    post:
+      operationId: hubspotEvent
+      description: |
+        Placeholder for HubSpot webhook batches. No events are processed or
+        acknowledged as accepted yet. Signature verification and durable refresh
+        scheduling must be implemented before enabling HubSpot subscriptions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/HubSpotWebhookEvent'
+      responses:
+        '400':
+          description: Malformed webhook batch
+        '413':
+          description: Payload too large
+        '415':
+          description: Content type must be application/json
+        '501':
+          description: Webhook processing is not implemented
+  /slack/events:
+    post:
+      operationId: slackEvent
+      description: Authenticated Slack Events API envelopes. Raw-body signature verification precedes JSON decoding.
+      parameters:
+        - in: header
+          name: X-Slack-Request-Timestamp
+          required: true
+          schema:
+            type: string
+      security:
+        - SlackSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Envelope'
+      responses:
+        '200':
+          description: Durably accepted, deliberately ignored, or URL challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Acknowledgement'
+        '400':
+          description: Malformed envelope
+        '401':
+          description: Invalid signature, timestamp, or workspace
+        '413':
+          description: Payload too large
+        '415':
+          description: Content type must be application/json
+        '503':
+          description: Temporary failure; Slack should retry
+components:
+  securitySchemes:
+    SlackSignature:
+      description: Slack v0 HMAC SHA-256 signature over version, timestamp, and exact raw request body; timestamps must be within five minutes.
+      in: header
+      name: X-Slack-Signature
+      type: apiKey
+  schemas:
+    HubSpotWebhookEvent:
+      type: object
+      description: |
+        HubSpot CRM webhook event. Supports legacy ticket.* and generic object.*
+        subscription types. Generic ticket events identify tickets with
+        objectTypeId 0-5. Unknown fields are retained for forward compatibility.
+        Property-change events include propertyName and propertyValue; other
+        event-specific fields are optional. Event IDs alone are not guaranteed
+        unique, and deliveries may be duplicated or arrive out of order.
+      additionalProperties: true
+      required: [portalId, objectId, occurredAt, subscriptionType]
+      properties:
+        eventId:
+          type: integer
+          format: int64
+          description: Event identifier; not a globally unique deduplication key.
+        subscriptionId:
+          type: integer
+          format: int64
+          description: Webhook subscription identifier.
+        portalId:
+          type: integer
+          format: int64
+          description: HubSpot account identifier.
+        appId:
+          type: integer
+          format: int64
+          description: HubSpot app identifier.
+        occurredAt:
+          type: integer
+          format: int64
+          description: Event occurrence time in milliseconds since the Unix epoch.
+        attemptNumber:
+          type: integer
+          description: Delivery attempt number.
+        objectId:
+          type: integer
+          format: int64
+          description: CRM record identifier; the ticket ID for ticket events.
+        objectTypeId:
+          type: string
+          description: CRM object type for generic events; 0-5 denotes tickets.
+          example: '0-5'
+        subscriptionType:
+          type: string
+          description: Event type, kept open to support legacy and generic formats.
+          example: object.propertyChange
+        propertyName:
+          type: string
+          description: Internal property name for a property-change event.
+          example: hs_pipeline_stage
+        propertyValue:
+          type: string
+          description: New property value; may be empty when cleared.
+        changeSource:
+          type: string
+          description: Source of the change, when provided by HubSpot.
+        sourceId:
+          type: string
+          description: Source identifier, when provided by HubSpot.
+      example:
+        eventId: 123456
+        subscriptionId: 789
+        portalId: 20520962
+        appId: 12345
+        occurredAt: 1791404102000
+        attemptNumber: 0
+        objectId: 49253362846
+        objectTypeId: '0-5'
+        subscriptionType: object.propertyChange
+        propertyName: hs_pipeline_stage
+        propertyValue: '2'
+    Acknowledgement:
+      type: object
+      properties:
+        challenge:
+          type: string
+    Envelope:
+      type: object
+      required: [type]
+      properties:
+        challenge:
+          type: string
+        event:
+          $ref: '#/components/schemas/SlackEvent'
+        event_id:
+          type: string
+        team_id:
+          type: string
+        type:
+          type: string
+    SlackEvent:
+      type: object
+      required: [type]
+      properties:
+        bot_id:
+          type: string
+        channel:
+          type: string
+        channel_type:
+          type: string
+        deleted_ts:
+          type: string
+        message:
+          $ref: '#/components/schemas/SlackMessage'
+        previous_message:
+          $ref: '#/components/schemas/SlackMessage'
+        subtype:
+          type: string
+        text:
+          type: string
+        thread_ts:
+          type: string
+        ts:
+          type: string
+        type:
+          type: string
+        user:
+          type: string
+    SlackMessage:
+      type: object
+      properties:
+        bot_id:
+          type: string
+        subtype:
+          type: string
+        text:
+          type: string
+        thread_ts:
+          type: string
+        ts:
+          type: string
+        user:
+          type: string

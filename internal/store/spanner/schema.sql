@@ -1,0 +1,4 @@
+CREATE TABLE `{{TABLE}}` (
+    RecordKey STRING(1024) NOT NULL,
+    RecordValue BYTES(MAX) NOT NULL
+) PRIMARY KEY (RecordKey)
