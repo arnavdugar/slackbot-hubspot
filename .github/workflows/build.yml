@@ -1,0 +1,171 @@
+name: Build deployable image
+
+on:
+  pull_request:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Go checks and storage conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDSDK_API_ENDPOINT_OVERRIDES_SPANNER: http://127.0.0.1:9020/
+      CLOUDSDK_AUTH_DISABLE_CREDENTIALS: 'true'
+      CLOUDSDK_CORE_DISABLE_PROMPTS: 'true'
+      CLOUDSDK_CORE_PROJECT: slackhubspot-test
+      SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      STORE_TEST_POSTGRES_DSN: postgres://slackhubspot@127.0.0.1:5432/slackhubspot?sslmode=disable
+      STORE_TEST_SPANNER_DATABASE: projects/slackhubspot-test/instances/test-instance/databases/test-database
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: slackhubspot
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: slackhubspot
+        options: >-
+          --health-cmd "pg_isready -U slackhubspot -d slackhubspot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 5432:5432
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator:1.5.58@sha256:e5bb3535cb3c1e821802531efd9a1d29bbf9804db57a4ae36731764926e3bcb8
+        ports:
+          - 9010:9010
+          - 9020:9020
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          cache-dependency-path: go.sum
+          go-version: '1.25.x'
+      - name: Initialize isolated Spanner emulator database
+        run: |
+          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 --max-time 2 \
+            http://127.0.0.1:9020/v1/projects/slackhubspot-test/instanceConfigs > /dev/null
+          gcloud spanner instances create test-instance \
+            --config=emulator-config --description='CI test instance' --nodes=1
+          gcloud spanner databases create test-database --instance=test-instance
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            printf 'Run gofmt on:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Vet Go packages
+        run: go vet ./...
+      - name: Run race tests across all three storage drivers
+        run: go test -race -count=1 -timeout=10m ./...
+
+  image:
+    name: Build downloadable multi-platform OCI image
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      labels: ${{ steps.metadata.outputs.labels }}
+      tags: ${{ steps.metadata.outputs.tags }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Generate image tags and OCI labels
+        id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          labels: |
+            org.opencontainers.image.created={{commit_date 'YYYY-MM-DDTHH:mm:ss.SSS[Z]'}}
+            org.opencontainers.image.description=Private Slack thread synchronization to HubSpot tickets
+            org.opencontainers.image.title=Slack HubSpot synchronization bot
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }},priority=200
+            type=ref,event=pr,priority=100
+            type=semver,pattern={{version}},priority=900
+            type=semver,pattern={{major}}.{{minor}},priority=800
+            type=sha,format=long,priority=700
+      - name: Build both architectures into an OCI archive
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          build-args: VERSION=${{ steps.metadata.outputs.version }}
+          cache-from: type=gha,scope=slackhubspot-image
+          cache-to: type=gha,mode=max,scope=slackhubspot-image
+          context: .
+          labels: ${{ steps.metadata.outputs.labels }}
+          outputs: type=oci,dest=${{ runner.temp }}/slackhubspot.oci.tar
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.metadata.outputs.tags }}
+      - name: Checksum the deployable archive
+        run: sha256sum slackhubspot.oci.tar > slackhubspot.oci.tar.sha256
+        working-directory: ${{ runner.temp }}
+      - name: Upload the deployable archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          name: slackhubspot-oci-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/slackhubspot.oci.tar
+            ${{ runner.temp }}/slackhubspot.oci.tar.sha256
+          retention-days: 14
+
+  publish:
+    name: Publish versioned image to GHCR
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: image
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Authenticate to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+      - name: Publish both architectures
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          build-args: VERSION=${{ needs.image.outputs.version }}
+          cache-from: type=gha,scope=slackhubspot-image
+          context: .
+          labels: ${{ needs.image.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          push: true
+          sbom: true
+          tags: ${{ needs.image.outputs.tags }}

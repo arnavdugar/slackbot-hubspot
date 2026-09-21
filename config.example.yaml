@@ -1,0 +1,62 @@
+hubspot:
+  access_token_env: HUBSPOT_ACCESS_TOKEN
+  account_id: "123456"
+
+server:
+  max_body_bytes: 1048576
+  port: 8080
+  read_header_timeout: 5s
+  request_timeout: 2500ms
+
+slack:
+  bot_token_env: SLACK_BOT_TOKEN
+  bot_user_id: U0123456789
+  failure_reaction: warning
+  # Optional separate user token with groups:history for conversations.replies:
+  # history_token_file: /run/secrets/slack-history-token
+  signing_secret_env: SLACK_SIGNING_SECRET
+  success_reaction: white_check_mark
+  workspace_id: T0123456789
+
+storage:
+  driver: sqlite
+  postgres:
+    dsn_env: DATABASE_URL
+    max_idle_connections: 5
+    max_open_connections: 20
+    schema: slack_hubspot
+  spanner:
+    database_id: slack-hubspot
+    instance_id: integrations
+    project_id: example-project
+    table_prefix: SlackHubSpot
+  sqlite:
+    path: /data/slack-hubspot.db
+
+# Only allowlisted {{.Field}} substitutions are accepted. Ticket properties are
+# visible to channel members; choose the template according to your deployment.
+summary_template: |-
+  *{{.Subject}}*
+  Ticket {{.ID}} · {{.Status}} · {{.Priority}}
+  <{{.URL}}|Open ticket>
+
+sync:
+  allowed_mime_types:
+    - application/pdf
+    - image/jpeg
+    - image/png
+    - text/plain
+  attachments: true
+  max_attachment_bytes: 25000000
+  temp_dir: /tmp
+
+worker:
+  backoff_base: 1s
+  backoff_max: 5m
+  coalesce_delay: 1s
+  concurrency: 4
+  grace_period: 30s
+  lease_duration: 2m
+  max_attempts: 8
+  poll_interval: 1s
+  replicas: 1

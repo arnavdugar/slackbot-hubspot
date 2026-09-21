@@ -1,0 +1,28 @@
+services:
+  bot:
+    build:
+      args:
+        VERSION: ${VERSION:-development}
+      context: .
+    cap_drop:
+      - ALL
+    environment:
+      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:?Set HUBSPOT_ACCESS_TOKEN}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?Set SLACK_BOT_TOKEN}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:?Set SLACK_SIGNING_SECRET}
+    image: slackhubspot:${VERSION:-development}
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 35s
+    tmpfs:
+      - /tmp:mode=1777,size=128m
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - data:/data
+
+volumes:
+  data:

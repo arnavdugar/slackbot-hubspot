@@ -1,0 +1,11 @@
+.env
+.env.*
+.git
+.jj
+.tmp
+bin
+coverage.out
+config.yaml
+data
+secrets
+*.db*
