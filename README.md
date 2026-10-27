@@ -11,7 +11,7 @@ All eligible messages, including the root, are retrieved from Slack and rendered
 
 ## Run
 
-Requires Go 1.25 or later, or Docker. Start with [config.example.yaml](config.example.yaml), copying it to the ignored `config.yaml`. Set the actual Slack workspace/bot IDs and HubSpot account ID, and supply credentials through the environment or mounted secret files. Never put credentials in the image or tracked files.
+Requires Go 1.27.3 or later, or Docker. Start with [config.example.yaml](config.example.yaml), copying it to the ignored `config.yaml`. Set the actual Slack workspace/bot IDs and HubSpot account ID, and supply credentials through the environment or mounted secret files. Never put credentials in the image or tracked files.
 
 ```sh
 cp config.example.yaml config.yaml
