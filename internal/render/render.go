@@ -184,9 +184,14 @@ func (s *Summary) Render(ticket domain.Ticket) string {
 	return out.String()
 }
 
+type Attachment struct {
+	Status string
+	URL    string
+}
+
 // Transcript rebuilds the entire integration-owned note. Attachments maps Slack
-// file IDs to human-readable synchronization status, including partial failures.
-func Transcript(key domain.ThreadKey, messages []domain.Message, attachments map[string]string) string {
+// file IDs to synchronization outcomes and links to copied HubSpot files.
+func Transcript(key domain.ThreadKey, messages []domain.Message, attachments map[string]Attachment) string {
 	messages = append([]domain.Message(nil), messages...)
 	sort.SliceStable(messages, func(i, j int) bool {
 		left, lf, _ := strings.Cut(messages[i].Timestamp, ".")
@@ -226,11 +231,16 @@ func Transcript(key domain.ThreadKey, messages []domain.Message, attachments map
 		files := append([]domain.File(nil), message.Files...)
 		sort.SliceStable(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 		for _, file := range files {
-			status := attachments[file.ID]
+			attachment := attachments[file.ID]
+			status := attachment.Status
 			if status == "" {
 				status = "pending upload"
 			}
-			out.WriteString("<br>Attachment: " + html.EscapeString(file.Name) + " — " + html.EscapeString(status))
+			name := html.EscapeString(file.Name)
+			if safeURL(attachment.URL) {
+				name = `<a href="` + html.EscapeString(attachment.URL) + `">` + name + `</a>`
+			}
+			out.WriteString("<br>Attachment: " + name + " — " + html.EscapeString(status))
 		}
 		out.WriteString("</p>")
 	}

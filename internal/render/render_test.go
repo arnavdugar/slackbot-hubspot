@@ -80,19 +80,89 @@ func TestSummaryEscapesTicketValues(t *testing.T) {
 }
 
 func TestTranscriptEscapesUntrustedContent(t *testing.T) {
-	messages := []domain.Message{{Files: []domain.File{{ID: "F1", Name: "<img>.png"}}, Permalink: "javascript:alert(1)", SenderName: "<svg>", Text: "<script>alert(1)</script> <javascript:alert(1)|click> &lt;b&gt;", Timestamp: "1710000002.000002", UserID: "U2"}}
+	messages := []domain.Message{{
+		Files:      []domain.File{{ID: "F1", Name: `<img> & "photo".png`}, {ID: "F2", Name: "failed.png"}},
+		Permalink:  "javascript:alert(1)",
+		SenderName: "<svg>",
+		Text:       "<script>alert(1)</script> <javascript:alert(1)|click> &lt;b&gt;",
+		Timestamp:  "1710000002.000002",
+		UserID:     "U2",
+	}}
+	attachments := map[string]Attachment{
+		"F1": {Status: "synced", URL: "https://app.hubspot.com/file-preview/42/file/101/?a=1&b=2"},
+		"F2": {Status: "failed: <size>", URL: "javascript:alert(1)"},
+	}
 
-	got := Transcript(domain.ThreadKey{ChannelID: "C1", ThreadTS: "1.0", WorkspaceID: "T1"}, messages, map[string]string{"F1": "failed: <size>"})
+	got := Transcript(domain.ThreadKey{ChannelID: "C1", ThreadTS: "1.0", WorkspaceID: "T1"}, messages, attachments)
 
 	for _, unsafe := range []string{"<script>", "<svg>", "<img>", `href="javascript:`} {
 		if strings.Contains(got, unsafe) {
 			t.Errorf("unsafe HTML %q in %s", unsafe, got)
 		}
 	}
-	for _, want := range []string{"&lt;script&gt;", "&lt;svg&gt;", "Attachment: &lt;img&gt;.png — failed: &lt;size&gt;"} {
+	for _, want := range []string{
+		"&lt;script&gt;",
+		"&lt;svg&gt;",
+		`Attachment: <a href="https://app.hubspot.com/file-preview/42/file/101/?a=1&amp;b=2">&lt;img&gt; &amp; &#34;photo&#34;.png</a> — synced`,
+		"Attachment: failed.png — failed: &lt;size&gt;",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
+	}
+}
+
+func TestTranscriptKeepsSameNamedAttachmentsWithTheirMessages(t *testing.T) {
+	messages := []domain.Message{
+		{Files: []domain.File{{ID: "F1", Name: "photo.jpeg"}}, Text: "Earlier upload", Timestamp: "1710000001.000001", UserID: "U1"},
+		{Files: []domain.File{{ID: "F2", Name: "photo.jpeg"}}, Text: "Later upload", Timestamp: "1710000002.000002", UserID: "U2"},
+	}
+	attachments := map[string]Attachment{
+		"F1": {Status: "synced", URL: "https://app.hubspot.com/file-preview/42/file/101/"},
+		"F2": {Status: "synced", URL: "https://app.hubspot.com/file-preview/42/file/102/"},
+	}
+
+	got := Transcript(domain.ThreadKey{}, messages, attachments)
+
+	for _, tc := range []struct {
+		text, fileID, otherID string
+	}{
+		{"Earlier upload", "101", "102"},
+		{"Later upload", "102", "101"},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			_, afterMessage, found := strings.Cut(got, tc.text)
+			if !found {
+				t.Fatalf("message missing from transcript: %s", got)
+			}
+			entry, _, _ := strings.Cut(afterMessage, "</p>")
+			want := `Attachment: <a href="https://app.hubspot.com/file-preview/42/file/` + tc.fileID + `/">photo.jpeg</a> — synced`
+			if !strings.Contains(entry, want) || strings.Contains(entry, "/file/"+tc.otherID+"/") {
+				t.Errorf("attachment linked to the wrong message: %s", entry)
+			}
+		})
+	}
+}
+
+func TestTranscriptAttachmentsWithoutLinksKeepTheirStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		attachments map[string]Attachment
+		wantStatus  string
+	}{
+		{"pending", nil, "pending upload"},
+		{"disabled", map[string]Attachment{"F1": {Status: "copying disabled"}}, "copying disabled"},
+		{"failed", map[string]Attachment{"F1": {Status: "not synchronized: attachment_size_limit"}}, "not synchronized: attachment_size_limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := []domain.Message{{Files: []domain.File{{ID: "F1", Name: "photo.jpeg"}}, Timestamp: "1710000001.000001", UserID: "U1"}}
+
+			got := Transcript(domain.ThreadKey{}, messages, tc.attachments)
+
+			if !strings.Contains(got, "Attachment: photo.jpeg — "+tc.wantStatus) || strings.Contains(got, "<a ") {
+				t.Fatalf("attachment status missing or unavailable file linked: %s", got)
+			}
+		})
 	}
 }
 

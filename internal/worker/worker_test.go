@@ -177,8 +177,15 @@ func TestReconciliationPreservesTextAndOtherAttachmentsOnPermanentFailure(t *tes
 	if hubspot.creates != 1 || hubspot.uploads != 1 || !slices.Equal(hubspot.fileIDs, []string{"hub-file-1"}) {
 		t.Fatalf("remote operations = %+v", hubspot)
 	}
-	if !strings.Contains(hubspot.body, "important text") || !strings.Contains(hubspot.body, "attachment_size_limit") {
-		t.Fatalf("text or failure missing: %s", hubspot.body)
+	for _, want := range []string{
+		"important text",
+		`href="https://app.hubspot.com/file-preview/1/file/hub-file-1/"`,
+		"Attachment: large.txt — not synchronized:",
+		"attachment_size_limit",
+	} {
+		if !strings.Contains(hubspot.body, want) {
+			t.Errorf("missing %q in transcript: %s", want, hubspot.body)
+		}
 	}
 }
 
@@ -237,6 +244,9 @@ func TestResyncReusesNoteAndUploadMappings(t *testing.T) {
 
 	if hubspot.creates != 1 || hubspot.uploads != 1 || hubspot.updates != 2 {
 		t.Fatalf("mappings not reused: %+v", hubspot)
+	}
+	if !strings.Contains(hubspot.body, `href="https://app.hubspot.com/file-preview/1/file/hub-file-1/"`) {
+		t.Fatalf("reused upload missing its file link: %s", hubspot.body)
 	}
 }
 

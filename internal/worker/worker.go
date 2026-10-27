@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"mime"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -196,7 +197,7 @@ func (w *Worker) reconcile(ctx, serviceCtx context.Context, lease domain.Lease) 
 	if len(messages) != 0 {
 		completion.LastMessageTS = messages[len(messages)-1].Timestamp
 	}
-	attachments := make(map[string]string)
+	attachments := make(map[string]render.Attachment)
 	fileIDs := make([]string, 0)
 	partial := 0
 	for _, message := range messages {
@@ -205,13 +206,16 @@ func (w *Worker) reconcile(ctx, serviceCtx context.Context, lease domain.Lease) 
 				continue
 			}
 			if !w.options.Attachments {
-				attachments[file.ID] = "copying disabled"
+				attachments[file.ID] = render.Attachment{Status: "copying disabled"}
 				w.options.Metrics.Inc("attachments_skipped")
 				continue
 			}
 			id, fileErr := w.attachment(ctx, serviceCtx, lease, file)
 			if fileErr == nil {
-				attachments[file.ID] = "synced (HubSpot file " + id + ")"
+				attachments[file.ID] = render.Attachment{
+					Status: "synced",
+					URL:    "https://app.hubspot.com/file-preview/" + url.PathEscape(w.options.AccountID) + "/file/" + url.PathEscape(id) + "/",
+				}
 				fileIDs = append(fileIDs, id)
 				continue
 			}
@@ -219,7 +223,7 @@ func (w *Worker) reconcile(ctx, serviceCtx context.Context, lease domain.Lease) 
 				return completion, fileErr
 			}
 			partial++
-			attachments[file.ID] = "not synchronized: " + safeError(fileErr)
+			attachments[file.ID] = render.Attachment{Status: "not synchronized: " + safeError(fileErr)}
 			// Retry partial attachment failures without withholding message text.
 			if lease.Thread.Attempts < w.options.MaxAttempts && retryable(fileErr) {
 				retryAt := w.retryAt(fileErr, lease.Thread.Attempts)
